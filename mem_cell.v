@@ -12,7 +12,6 @@ module mem_cell #(
                     
     );
     
-    integer i = 0;
     reg [DATA_OUT_WIDTH-1:0]mem[(1 << ADDR_WIDTH)-1:0];
 
     initial begin

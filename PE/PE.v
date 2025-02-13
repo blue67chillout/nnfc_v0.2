@@ -7,9 +7,15 @@ module PE #(
     input [3:0]rd_en,
     input [3:0]wr_en,
     input [3:0]mac_en,
+    input [3:0]act_fn_en,
 
     input [15:0]in_ip,
-    input [DATA_IN_WIDTH -1 :0]data_in
+    input [DATA_IN_WIDTH -1 :0]data_in,
+
+    output [31:0]acc_result_0,
+    output [31:0]acc_result_1,
+    output [31:0]acc_result_2,
+    output [31:0]acc_result_3,
 
 
 );
@@ -18,6 +24,9 @@ wire [31:0]acc_result_0;
 wire [31:0]acc_result_1;
 wire [31:0]acc_result_2;
 wire [31:0]acc_result_3;
+
+wire [31:0] relu_acc;
+wire [15:0] relu_out;
 
 wire [15:0]fifo_dout_0;
 wire [15:0]fifo_dout_1;
@@ -49,9 +58,7 @@ fifo #(
     .empty(empty_0)
 );
 
-bf_mac #(
-    .DATA_IN_WIDTH(DATA_IN_WIDTH)
-) bf_mac_0 (
+bf_mac bf_mac_0 (
     .clk(clk),
     .rst(rst),
     .in_1(in_ip),
@@ -69,7 +76,7 @@ fifo #(
 ) fifo_1 (
     .clk(clk),
     .rst(rst),
-    .din(acc_result_0),
+    .din(data_in),
     .rd_en(rd_en[1]),
     .wr_en(wr_en[1]),
     .dout(fifo_dout_1),
@@ -77,9 +84,7 @@ fifo #(
     .empty(empty_1)
 );
 
-bf_mac #(
-    .DATA_IN_WIDTH(DATA_IN_WIDTH)
-) bf_mac_1 (
+bf_mac  bf_mac_1 (
     .clk(clk),
     .rst(rst),
     .in_1(in_ip),
@@ -97,7 +102,7 @@ fifo #(
 ) fifo_2 (
     .clk(clk),
     .rst(rst),
-    .din(acc_result_1),
+    .din(data_in),
     .rd_en(rd_en[2]),
     .wr_en(wr_en[2]),
     .dout(fifo_dout_2),
@@ -105,9 +110,7 @@ fifo #(
     .empty(empty_2)
 );
 
-bf_mac #(
-    .DATA_IN_WIDTH(DATA_IN_WIDTH)
-) bf_mac_2 (
+bf_mac bf_mac_2 (
     .clk(clk),
     .rst(rst),
     .in_1(in_ip),
@@ -125,7 +128,7 @@ fifo #(
 ) fifo_3 (
     .clk(clk),
     .rst(rst),
-    .din(acc_result_2),
+    .din(data_in),
     .rd_en(rd_en[3]),
     .wr_en(wr_en[3]),
     .dout(fifo_dout_3),
@@ -133,9 +136,7 @@ fifo #(
     .empty(empty_3)
 );
 
-bf_mac #(
-    .DATA_IN_WIDTH(DATA_IN_WIDTH)
-) bf_mac_3 (
+bf_mac bf_mac_3 (
     .clk(clk),
     .rst(rst),
     .in_1(in_ip),
@@ -143,6 +144,51 @@ bf_mac #(
     .mac_en(mac_en[3]),
     .acc_result(acc_result_3)
 );
+
+relu relu_0 (
+    .clk(clk),
+    .rst(rst),
+    .in(acc_result_0),
+    .out(acc_result_0),
+    .en(act_fn_en[0])
+);
+
+relu relu_1 (
+    .clk(clk),
+    .rst(rst),
+    .in(acc_result_1),
+    .out(acc_result_1),
+    .en(act_fn_en[1])
+);
+
+relu relu_2 (
+    .clk(clk),
+    .rst(rst),
+    .in(acc_result_2),
+    .out(acc_result_2),
+    .en(act_fn_en[2])
+);
+
+relu relu_3 (
+    .clk(clk),
+    .rst(rst),
+    .in(acc_result_3),
+    .out(acc_result_3),
+    .en(act_fn_en[3])
+);
+
+
+
+// assign relu_acc = act_fn_en[0] ? acc_result_0 : act_fn_en[1] ? acc_result_0 : 
+//                  act_fn_en[2] ? acc_result_0 : act_fn_en[3] ? acc_result_0 : 0; 
+
+// relu relu_0 (
+//     .clk(clk),
+//     .rst(rst),
+//     .in(relu_acc),
+//     .out(relu_out)
+// );
+
 
 
 

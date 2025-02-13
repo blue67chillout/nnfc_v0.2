@@ -1,174 +1,112 @@
-
-// npl -> nodes per layer
-// ipn -> inputs per node
-
-
-// +-------------------------------+
-// |          IDLE                  |
-// |                                |
-// |  Output: arb_en = 0            |
-// |  Next State: MEM (if feed_through = 0) |
-// |                                |
-// +-------------------------------+
-//             |
-//             | feed_through == 0
-//             v 
-// +-------------------------------+
-// |          MEM                   |
-// |                                |
-// |  Output: arb_en = 1            |
-// |  Next State: MAC (if fetch_mem_cyc_counter == NO_IPN-1) |
-// |                                |
-// +-------------------------------+
-//             |
-//             | fetch_mem_cyc_counter == NO_IPN-1
-//             v
-// +-------------------------------+
-// |          MAC                   |
-// |                                |
-// |  Output: mac_en = 1            |
-// |  Next State: BIAS (if mac_cyc_counter == NO_IPN-1) |
-// |                                |
-// +-------------------------------+
-//             |
-//             | mac_cyc_counter == NO_IPN-1
-//             v
-// +-------------------------------+
-// |          BIAS                  |
-// |                                |
-// |  Output: bias_add_en = 1       |
-// |  Next State: ACT (if bias_cyc_counter == NO_NPL-1) |
-// |                                |
-// +-------------------------------+
-//             |
-//             | bias_cyc_counter == NO_NPL-1
-//             v
-// +-------------------------------+
-// |          ACT                   |
-// |                                |
-// |  Output: act_fn_en = 1         |
-// |  Next State: IDLE (if act_cyc_counter == NO_NPL-1) |
-// |                                |
-// +-------------------------------+
-//             |
-//             | act_cyc_counter == NO_NPL-1
-//             v
-// +-------------------------------+
-// |          IDLE                  |
-// |                                |
-// |  Output: arb_en = 0            |
-// |  Next State: MEM (if feed_through = 0) |
-// |                                |
-// +-------------------------------+
-
-
-module layer_ctrl #(NO_NPL = 4, NO_IPN =4 )(
-
+module main_control #(
+    parameter NO_INPUTS_FL = 785,
+    parameter NO_HIDDEN_LAYERS = 2,
+    parameter NO_NEURONS_HL = 28,
+    parameter NO_NEURONS_OL = 10
+) (
     input clk,
     input rst,
-    input start,
+    output reg [3:0] rd_en,
+    output reg [3:0] mac_en,
+    output reg [3:0] act_fn_en,
+    output reg feed_through,
     output reg arb_en,
-    output mac_en,
-    output act_fn_en,
-    output bias_add_en,
-    output feed_through
-
+    output reg [9:0] base_addr,
+    output reg [9:0] start_offset,
+    output reg [9:0] stride,
+    output reg [2:0] layer_no
 );
-    localparam  IDLE  = 4'b0000 ;
-    localparam  MEM   = 4'b0001 ;
-    localparam  MAC   = 4'b0010 ;
-    localparam  BIAS  = 4'b0100 ;
-    localparam  ACT   = 4'b1000 ;
-
-    reg [3:0] ps, ns;
-    reg [$clog2(NO_IPN):0] fetch_mem_cyc_counter,mac_cyc_counter;
-    reg [$clog2(NO_NPL):0] bias_cyc_counter,act_cyc_counter;
-
-    always@(posedge clk) begin
-        if(rst) begin
-            ps <= IDLE;
-            arb_en <=0;
-        end
-
-        else if(start && !rst) begin 
-            ps <= ns;           
-        end
-    end
 
 
-    
-    always @(*) begin
-        case (ps)
-            IDLE: begin if (!feed_through)
-                        begin ns = MEM; arb_en =1 ;end
-                    else
-                        begin ns = IDLE;arb_en = 0 ; end
-                  end
-            MEM:  ns = (fetch_mem_cyc_counter == NO_IPN-1) ? MAC : MEM;
-            MAC:  ns = (mac_cyc_counter == NO_IPN-1) ? BIAS : MAC;   
-            BIAS: ns = (bias_cyc_counter == NO_NPL-1) ? ACT : BIAS;
-            ACT:  ns = (act_cyc_counter == NO_NPL-1) ? IDLE : ACT;
-            default: ns = IDLE;
-        endcase
-    end
+    reg [10:0] counter;
+    reg [2:0] state;
+    reg [10:0] compute_cycles;
+    reg [1:0] act_fn_index;
 
-    always @(posedge clk) begin
+    localparam IDLE       = 5'b00000,
+               MEM_DELAY  = 5'b00001,
+               LOAD_FIFO  = 5'b00010,
+               COMPUTE    = 5'b00100,
+               ACTIVATE   = 5'b01000,
+               FEED_NEXT  = 5'b10000;
+
+    always @(posedge clk ) begin
+        
         if (rst) begin
-            mac_cyc_counter <= 0;
-            fetch_mem_cyc_counter <= 0;
-            bias_cyc_counter <= 0;
-            act_cyc_counter <= 0;
-        end
+            state <= IDLE;
+            counter <= 0;
+            rd_en <= 4'b0000;
+            mac_en <= 4'b0000;
+            act_fn_en <= 4'b0000;
+            feed_through <= 1'b0;
+            arb_en <= 1'b0;
+            base_addr <= 10'b0;
+            start_offset <= 10'b0;
+            stride <= 10'b0;
+            layer_no <= 0;
+            compute_cycles <= NO_INPUTS_FL + 1;
+            act_fn_index <= 0;
 
-        else if (start) begin
-            case (ps)
-                MEM: begin
-                    bias_cyc_counter <= 0;
-                    if (fetch_mem_cyc_counter == NO_IPN-1) begin
-                        fetch_mem_cyc_counter <= NO_IPN;
-                    end
-                    else begin
-                        fetch_mem_cyc_counter <= fetch_mem_cyc_counter + 1;
+        end else begin
+
+            case (state)
+                IDLE: begin
+                    counter <= 0;
+                    arb_en <= 1'b1;
+                    if (arb_en) state <= MEM_DELAY;
+                end
+                
+                MEM_DELAY: begin
+                    counter <= counter + 1;
+                    if (counter == 2) begin
+                        counter <= 0;
+                        state <= LOAD_FIFO;
                     end
                 end
 
-                MAC: begin
-                    act_cyc_counter <=0;
-                    if (mac_cyc_counter == NO_IPN-1) begin
-                        mac_cyc_counter <= NO_IPN;
-                    end
-                    else begin
-                        mac_cyc_counter <= mac_cyc_counter + 1;
+                LOAD_FIFO: begin
+                    counter <= counter + 1;
+                    if (counter == 3) begin
+                        counter <= 0;
+                        state <= COMPUTE;
                     end
                 end
-
-                BIAS: begin
-                    fetch_mem_cyc_counter <= 0;
-                    if (bias_cyc_counter == NO_NPL) begin
-                        bias_cyc_counter <= NO_NPL;
+                
+                COMPUTE: begin
+                    counter <= counter + 1;
+                    if (counter >= 4) begin // FIFO delay of 4 cycles
+                        rd_en <= 4'b1111;
+                        mac_en <= 4'b1111;
                     end
-                    else begin
-                        bias_cyc_counter <= bias_cyc_counter + 1;
+                    if (counter == compute_cycles + 4) begin
+                        counter <= 0;
+                        rd_en <= 4'b0000;
+                        mac_en <= 4'b0000;
+                        state <= ACTIVATE;
                     end
                 end
-
-                ACT: begin
-                    mac_cyc_counter <= 0;
-                    
-                    if (act_cyc_counter == NO_NPL) begin
-                        act_cyc_counter <= NO_NPL;
+                
+                ACTIVATE: begin
+                    act_fn_en <= 4'b0000;
+                    act_fn_en[act_fn_index] <= 1'b1;
+                    act_fn_index <= act_fn_index + 1;
+                    if (act_fn_index == 3) begin
+                        act_fn_index <= 0;
+                        state <= FEED_NEXT;
                     end
-                    else begin
-                        act_cyc_counter <= act_cyc_counter + 1;
-                    end
+                end
+                
+                FEED_NEXT: begin
+                    feed_through <= 1'b1;
+                    arb_en <= 1'b1;
+                    layer_no <= layer_no + 1;
+                    if (layer_no == 0) compute_cycles <= NO_NEURONS_HL + 1;
+                    else if (layer_no == NO_HIDDEN_LAYERS) compute_cycles <= NO_NEURONS_OL + 1;
+                    else compute_cycles <= NO_NEURONS_HL + 1;
+                    state <= COMPUTE;
                 end
             endcase
-        end 
+        end
     end
-
-assign  mac_en = ( ps == MAC && fetch_mem_cyc_counter  == NO_IPN ) ? 1 : 0;
-assign  bias_add_en = (ps == BIAS && mac_cyc_counter  == NO_IPN ) ? 1 : 0;   
-assign  act_fn_en = ( ps == ACT && bias_cyc_counter  == NO_NPL ) ? 1 : 0;
-assign  feed_through = (ps == IDLE && act_cyc_counter == NO_NPL ) ? 1 : 0;  
-
 endmodule
+
