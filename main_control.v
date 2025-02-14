@@ -94,8 +94,8 @@ module main_control #(
                     layer_no <= layer_no + 1;
                     if (layer_no == 0) compute_cycles <= NO_NEURONS_FL + 1;
                     else if (layer_no == NO_HIDDEN_LAYERS) compute_cycles <= NO_NEURONS_OL + 1;
-                    else compute_cycles <= NO_NEURONS_HL;
-                    state <= COMPUTE;
+                    else compute_cycles <= NO_INPUTS_FL;
+                    state <= (layer_no == NO_HIDDEN_LAYERS+1) ? IDLE :COMPUTE;
                 end
             endcase
         end
